@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server';
 import vision from '@google-cloud/vision';
 import OpenAI from 'openai';
 import * as cheerio from 'cheerio';
+import clientPromise from "@/lib/mongodb"; // MongoDB integration
+import { ObjectId } from "mongodb"; // MongoDB ObjectId
 
 if (!process.env.GOOGLE_CLOUD_PROJECT_ID || 
     !process.env.GOOGLE_CLOUD_PRIVATE_KEY || 
@@ -131,10 +133,65 @@ export async function POST(req: Request) {
       type: eventData.type || "social",
     };
 
-    return NextResponse.json(formattedData);
+    // Save to MongoDB
+    const client = await clientPromise;
+    const db = client.db("tapdin");
+    const plansCollection = db.collection("plans");
+    const result = await plansCollection.insertOne({
+      ...formattedData,
+      createdAt: new Date(),
+    });
+
+    return NextResponse.json({ success: true, id: result.insertedId });
 
   } catch (error) {
     console.error('Error processing request:', error);
     return NextResponse.json({ error: 'Failed to process request' }, { status: 500 });
+  }
+}
+
+export async function GET(req: Request) {
+  try {
+    const client = await clientPromise;
+    const db = client.db("tapdin");
+    const plansCollection = db.collection("plans");
+
+    // Retrieve all plans
+    const plans = await plansCollection.find({}).sort({ createdAt: -1 }).toArray();
+
+    return NextResponse.json(plans, {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (error) {
+    console.error("Error fetching plans:", error);
+    return NextResponse.json({ error: "Failed to fetch plans" }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: Request) {
+  try {
+    const body = await req.json();
+    const { id } = body;
+
+    if (!id) {
+      return NextResponse.json({ error: "Missing plan ID" }, { status: 400 });
+    }
+
+    const client = await clientPromise;
+    const db = client.db("tapdin");
+    const plansCollection = db.collection("plans");
+
+    const result = await plansCollection.deleteOne({ _id: new ObjectId(id) });
+
+    if (result.deletedCount === 0) {
+      return NextResponse.json({ error: "Plan not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({ success: true });
+
+  } catch (error) {
+    console.error("Error deleting plan:", error);
+    return NextResponse.json({ error: "Failed to delete plan" }, { status: 500 });
   }
 }

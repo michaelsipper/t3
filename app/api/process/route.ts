@@ -103,15 +103,7 @@ export async function POST(req: Request) {
     - description (string)
     - type (either "social", "business", or "entertainment")`;
 
-    type OpenAIResponse = {
-      choices: {
-        message?: {
-          content?: string | null; // Adjusted to allow `null`
-        };
-      }[];
-    };
-
-    const response: OpenAIResponse = await openai.chat.completions.create({
+    const response = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: [
         { role: "system", content: systemPrompt },
@@ -152,13 +144,19 @@ export async function POST(req: Request) {
       createdAt: new Date(),
     });
 
-    return NextResponse.json({ success: true, id: result.insertedId });
+    // Respond with all the data (frontend compatibility)
+    return NextResponse.json({
+      success: true,
+      id: result.insertedId,
+      ...formattedData, // Include all fields for UI prefill
+    });
 
   } catch (error) {
     console.error('Error processing request:', error);
     return NextResponse.json({ error: 'Failed to process request' }, { status: 500 });
   }
 }
+
 
 
 

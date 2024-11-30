@@ -79,22 +79,25 @@ export async function POST(req: Request) {
 
     if (url) {
       console.log('Processing URL:', url);
-      extractedText = await fetchUrlContent(url); // Timeout reduced in fetchUrlContent
+      extractedText = await fetchUrlContent(url);
     }
 
     if (file) {
       console.log('Processing file:', file.name);
       const buffer = Buffer.from(await file.arrayBuffer());
 
-      const result = await Promise.race([
+      type VisionResult = [ { textAnnotations?: { description?: string }[] } ]; // Define based on the actual API return type
+
+      const result = (await Promise.race([
         visionClient.textDetection(buffer),
         new Promise((_, reject) =>
           setTimeout(() => reject(new Error('Vision API timeout')), 5000)
         ),
-      ]);
-
+      ])) as VisionResult;
+      
       const detections = result[0]?.textAnnotations;
-      extractedText = detections && detections[0]?.description ? detections[0].description : '';
+      const extractedText = detections && detections[0]?.description ? detections[0].description : '';
+      
     }
 
     if (!extractedText) {
@@ -138,7 +141,6 @@ export async function POST(req: Request) {
       type: eventData.type || "social",
     };
 
-    // Save to MongoDB
     const client = await clientPromise;
     const db = client.db("tapdin");
     const plansCollection = db.collection("plans");
@@ -154,18 +156,18 @@ export async function POST(req: Request) {
     });
 
   } catch (error) {
-    console.error('Error processing request:', error);
-
-    if (error.message === 'Timeout fetching URL content' || error.message === 'Vision API timeout') {
-      return NextResponse.json({ error: 'Request timed out. Try again.' }, { status: 504 });
+    if (error instanceof Error) {
+      console.error('Error processing request:', error.message);
+      if (error.message === 'Timeout fetching URL content' || error.message === 'Vision API timeout') {
+        return NextResponse.json({ error: 'Request timed out. Try again.' }, { status: 504 });
+      }
+    } else {
+      console.error('Unknown error:', error);
     }
 
     return NextResponse.json({ error: 'Failed to process request' }, { status: 500 });
   }
 }
-
-
-
 
 
 export async function GET(req: Request) {

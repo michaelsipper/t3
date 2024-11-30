@@ -3,8 +3,8 @@ import { NextResponse } from 'next/server';
 import vision from '@google-cloud/vision';
 import OpenAI from 'openai';
 import * as cheerio from 'cheerio';
-import clientPromise from "@/lib/mongodb"; // MongoDB integration
-import { ObjectId } from "mongodb"; // MongoDB ObjectId
+import clientPromise from "@/lib/mongodb";
+import { ObjectId } from "mongodb";
 
 if (!process.env.GOOGLE_CLOUD_PROJECT_ID || 
     !process.env.GOOGLE_CLOUD_PRIVATE_KEY || 
@@ -25,6 +25,37 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+async function fetchUrlContent(url: string): Promise<string> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000); // Timeout after 8 seconds
+
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    const html = await response.text();
+    const $ = cheerio.load(html);
+
+    $('script').remove();
+    $('style').remove();
+
+    const title = $('title').text();
+    const metaDescription = $('meta[name="description"]').attr('content') || '';
+    const h1 = $('h1').text();
+    const mainContent = $('main').text() || $('article').text() || $('body').text();
+
+    return `
+      Title: ${title}
+      Description: ${metaDescription}
+      Heading: ${h1}
+      Content: ${mainContent.substring(0, 1000)}
+    `.trim();
+  } catch (error) {
+    console.error('Error fetching URL content:', error);
+    throw new Error('Timeout fetching URL content');
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 function parseDateTimeString(dateTimeString: string | undefined): string | null {
   if (!dateTimeString) return null;
   try {
@@ -33,35 +64,6 @@ function parseDateTimeString(dateTimeString: string | undefined): string | null 
   } catch (error) {
     console.error('Date parsing error:', error);
     return null;
-  }
-}
-
-async function fetchUrlContent(url: string): Promise<string> {
-  try {
-    const response = await fetch(url);
-    const html = await response.text();
-    const $ = cheerio.load(html);
-
-    // Remove script and style tags
-    $('script').remove();
-    $('style').remove();
-
-    // Extract meaningful content
-    const title = $('title').text();
-    const metaDescription = $('meta[name="description"]').attr('content') || '';
-    const h1 = $('h1').text();
-    const mainContent = $('main').text() || $('article').text() || $('body').text();
-
-    // Combine the extracted content
-    return `
-      Title: ${title}
-      Description: ${metaDescription}
-      Heading: ${h1}
-      Content: ${mainContent.substring(0, 1000)} // Limit content length
-    `.trim();
-  } catch (error) {
-    console.error('Error fetching URL:', error);
-    throw new Error('Failed to fetch URL content');
   }
 }
 
@@ -101,7 +103,15 @@ export async function POST(req: Request) {
     - description (string)
     - type (either "social", "business", or "entertainment")`;
 
-    const response = await openai.chat.completions.create({
+    type OpenAIResponse = {
+      choices: {
+        message?: {
+          content?: string | null; // Adjusted to allow `null`
+        };
+      }[];
+    };
+
+    const response: OpenAIResponse = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: [
         { role: "system", content: systemPrompt },
@@ -150,6 +160,8 @@ export async function POST(req: Request) {
   }
 }
 
+
+
 export async function GET(req: Request) {
   try {
     const client = await clientPromise;
@@ -174,8 +186,8 @@ export async function DELETE(req: Request) {
     const body = await req.json();
     const { id } = body;
 
-    if (!id) {
-      return NextResponse.json({ error: "Missing plan ID" }, { status: 400 });
+    if (!id || !ObjectId.isValid(id)) {
+      return NextResponse.json({ error: "Invalid plan ID" }, { status: 400 });
     }
 
     const client = await clientPromise;
